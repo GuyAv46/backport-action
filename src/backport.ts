@@ -138,6 +138,7 @@ export class Backport {
       const commitShas = await this.github.getCommits(mainpr);
 
       let commitShasToCherryPick;
+      let maybeMainprTarget = "";
 
       if (this.config.commits.cherry_picking === "auto") {
         const merge_commit_sha = await this.github.getMergeCommitSha(mainpr);
@@ -154,6 +155,7 @@ export class Backport {
               2, // +1 in case this concerns a shallowly cloned repo
             );
             commitShasToCherryPick = [merge_commit_sha!];
+            maybeMainprTarget = mainpr.base.ref;
             break;
           case MergeStrategy.REBASED:
             // If rebased merge_commit_sha represents the commit that the base branch was updated to
@@ -295,6 +297,7 @@ export class Backport {
               target,
               branchname,
               commitShasToCherryPick,
+              maybeMainprTarget,
             );
             console.error(message);
             successByTarget.set(target, false);
@@ -320,6 +323,7 @@ export class Backport {
               target,
               branchname,
               commitShasToCherryPick,
+              maybeMainprTarget,
             );
             console.error(message);
             successByTarget.set(target, false);
@@ -551,6 +555,7 @@ export class Backport {
     target: string,
     branchname: string,
     commitShasToCherryPick: string[],
+    additionalFetch: string = "",
   ): string {
     const reason = "because it was unable to create a new branch";
     const suggestion = this.composeSuggestion(
@@ -558,6 +563,8 @@ export class Backport {
       branchname,
       commitShasToCherryPick,
       false,
+      "fail",
+      additionalFetch,
     );
     return dedent`Backport failed for \`${target}\`, ${reason}.
 
@@ -569,6 +576,7 @@ export class Backport {
     target: string,
     branchname: string,
     commitShasToCherryPick: string[],
+    additionalFetch: string = "",
   ): string {
     const reason = "because it was unable to cherry-pick the commit(s)";
 
@@ -578,6 +586,7 @@ export class Backport {
       commitShasToCherryPick,
       false,
       "fail",
+      additionalFetch,
     );
 
     return dedent`Backport failed for \`${target}\`, ${reason}.
@@ -610,11 +619,12 @@ export class Backport {
     commitShasToCherryPick: string[],
     branchExist: boolean,
     confictResolution: string = "fail",
+    additionalFetch: string = "",
   ) {
     if (branchExist) {
       if (confictResolution === "draft_commit_conflicts") {
         return dedent`\`\`\`bash
-        git fetch origin ${branchname}
+        git fetch origin ${branchname} ${additionalFetch}
         git worktree add --checkout .worktree/${branchname} ${branchname}
         cd .worktree/${branchname}
         git reset --hard HEAD^
@@ -626,7 +636,7 @@ export class Backport {
       }
     } else {
       return dedent`\`\`\`bash
-      git fetch origin ${target}
+      git fetch origin ${target} ${additionalFetch}
       git worktree add -d .worktree/${branchname} origin/${target}
       cd .worktree/${branchname}
       git switch --create ${branchname}
@@ -677,7 +687,7 @@ export class Backport {
     );
     return dedent`Created backport PR for \`${target}\`:
                   - ${downstream}#${pr_number} with remaining conflicts!
-                  
+
                   ${suggestionToResolve}`;
   }
 
