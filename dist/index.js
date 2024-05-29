@@ -115,6 +115,7 @@ class Backport {
                 yield this.git.fetch(`refs/pull/${pull_number}/head`, this.config.pwd, mainpr.commits + 1);
                 const commitShas = yield this.github.getCommits(mainpr);
                 let commitShasToCherryPick;
+                let maybeMainprTarget = "";
                 if (this.config.commits.cherry_picking === "auto") {
                     const merge_commit_sha = yield this.github.getMergeCommitSha(mainpr);
                     // switch case to check if it is a squash, rebase, or merge commit
@@ -125,6 +126,7 @@ class Backport {
                             // To store the fetched commits indefinitely we save them to a remote ref using the sha
                             yield this.git.fetch(`+${merge_commit_sha}:refs/remotes/origin/${merge_commit_sha}`, this.config.pwd, 2);
                             commitShasToCherryPick = [merge_commit_sha];
+                            maybeMainprTarget = mainpr.base.ref;
                             break;
                         case github_1.MergeStrategy.REBASED:
                             // If rebased merge_commit_sha represents the commit that the base branch was updated to
@@ -219,7 +221,7 @@ class Backport {
                             yield this.git.checkout(branchname, `${this.getRemote()}/${target}`, this.config.pwd);
                         }
                         catch (error) {
-                            const message = this.composeMessageForCheckoutFailure(target, branchname, commitShasToCherryPick);
+                            const message = this.composeMessageForCheckoutFailure(target, branchname, commitShasToCherryPick, maybeMainprTarget);
                             console.error(message);
                             successByTarget.set(target, false);
                             yield this.github.createComment({
@@ -235,7 +237,7 @@ class Backport {
                             uncommitedShas = yield this.git.cherryPick(commitShasToCherryPick, this.config.experimental.conflict_resolution, this.config.pwd);
                         }
                         catch (error) {
-                            const message = this.composeMessageForCherryPickFailure(target, branchname, commitShasToCherryPick);
+                            const message = this.composeMessageForCherryPickFailure(target, branchname, commitShasToCherryPick, maybeMainprTarget);
                             console.error(message);
                             successByTarget.set(target, false);
                             yield this.github.createComment({
@@ -402,17 +404,17 @@ class Backport {
         return (0, dedent_1.default) `Backport failed for \`${target}\`: couldn't find remote ref \`${target}\`.
                   Please ensure that this Github repo has a branch named \`${target}\`.`;
     }
-    composeMessageForCheckoutFailure(target, branchname, commitShasToCherryPick) {
+    composeMessageForCheckoutFailure(target, branchname, commitShasToCherryPick, additionalFetch = "") {
         const reason = "because it was unable to create a new branch";
-        const suggestion = this.composeSuggestion(target, branchname, commitShasToCherryPick, false);
+        const suggestion = this.composeSuggestion(target, branchname, commitShasToCherryPick, false, "fail", additionalFetch);
         return (0, dedent_1.default) `Backport failed for \`${target}\`, ${reason}.
 
                   Please cherry-pick the changes locally.
                   ${suggestion}`;
     }
-    composeMessageForCherryPickFailure(target, branchname, commitShasToCherryPick) {
+    composeMessageForCherryPickFailure(target, branchname, commitShasToCherryPick, additionalFetch = "") {
         const reason = "because it was unable to cherry-pick the commit(s)";
-        const suggestion = this.composeSuggestion(target, branchname, commitShasToCherryPick, false, "fail");
+        const suggestion = this.composeSuggestion(target, branchname, commitShasToCherryPick, false, "fail", additionalFetch);
         return (0, dedent_1.default) `Backport failed for \`${target}\`, ${reason}.
 
                   Please cherry-pick the changes locally and resolve any conflicts.
@@ -423,11 +425,11 @@ class Backport {
         return (0, dedent_1.default) `Please cherry-pick the changes locally and resolve any conflicts.
                   ${suggestion}`;
     }
-    composeSuggestion(target, branchname, commitShasToCherryPick, branchExist, confictResolution = "fail") {
+    composeSuggestion(target, branchname, commitShasToCherryPick, branchExist, confictResolution = "fail", additionalFetch = "") {
         if (branchExist) {
             if (confictResolution === "draft_commit_conflicts") {
                 return (0, dedent_1.default) `\`\`\`bash
-        git fetch origin ${branchname}
+        git fetch origin ${branchname} ${additionalFetch}
         git worktree add --checkout .worktree/${branchname} ${branchname}
         cd .worktree/${branchname}
         git reset --hard HEAD^
@@ -441,7 +443,7 @@ class Backport {
         }
         else {
             return (0, dedent_1.default) `\`\`\`bash
-      git fetch origin ${target}
+      git fetch origin ${target} ${additionalFetch}
       git worktree add -d .worktree/${branchname} origin/${target}
       cd .worktree/${branchname}
       git switch --create ${branchname}
@@ -467,7 +469,7 @@ class Backport {
         const suggestionToResolve = this.composeMessageToResolveCommittedConflicts(target, branchname, commitShasToCherryPick, conflictResolution);
         return (0, dedent_1.default) `Created backport PR for \`${target}\`:
                   - ${downstream}#${pr_number} with remaining conflicts!
-                  
+
                   ${suggestionToResolve}`;
     }
     createOutput(successByTarget, createdPullRequestNumbers) {
